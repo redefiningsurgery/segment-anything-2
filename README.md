@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # SAM 2: Segment Anything in Images and Videos
 
 **[AI at Meta, FAIR](https://ai.meta.com/research/)**
@@ -184,3 +185,5 @@ If you use SAM 2 or the SA-V dataset in your research, please use the following 
   year={2024}
 }
 ```
+=======
+>>>>>>> 730b0e8 (Abed readme changes)
