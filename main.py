@@ -3,6 +3,7 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
+import time
 
 torch.autocast(device_type="cuda", dtype=torch.bfloat16).__enter__()
 
@@ -18,7 +19,7 @@ model_cfg = "sam2_hiera_l.yaml"
 
 predictor = build_sam2_video_predictor(model_cfg, sam2_checkpoint)
 
-def show_mask(mask, ax, obj_id=None, random_color=False, filename=None):
+def apply_mask_to_image(base_image, mask, obj_id=None, random_color=False):
     if random_color:
         color = np.concatenate([np.random.random(3), np.array([0.6])], axis=0)
     else:
@@ -27,19 +28,7 @@ def show_mask(mask, ax, obj_id=None, random_color=False, filename=None):
         color = np.array([*cmap(cmap_idx)[:3], 0.6])
     h, w = mask.shape[-2:]
     mask_image = mask.reshape(h, w, 1) * color.reshape(1, 1, -1)
-    ax.imshow(mask_image)
-    if filename:
-        plt.savefig(filename)
-    plt.close()
-
-def show_points(coords, labels, ax, marker_size=200, filename=None):
-    pos_points = coords[labels==1]
-    neg_points = coords[labels==0]
-    ax.scatter(pos_points[:, 0], pos_points[:, 1], color='green', marker='*', s=marker_size, edgecolor='white', linewidth=1.25)
-    ax.scatter(neg_points[:, 0], neg_points[:, 1], color='red', marker='*', s=marker_size, edgecolor='white', linewidth=1.25)
-    if filename:
-        plt.savefig(filename)
-    plt.close()
+    return mask_image
 
 video_dir = "output_frames"
 
@@ -49,7 +38,7 @@ frame_names = [
 ]
 frame_names.sort(key=lambda p: int(os.path.splitext(p)[0]))
 
-inference_state = predictor.init_state(video_path=video_dir) # frame loading (JPEG)
+inference_state = predictor.init_state(video_path=video_dir) # frame loading (JPEG): ...
 predictor.reset_state(inference_state)
 
 # import inspect
@@ -58,9 +47,22 @@ predictor.reset_state(inference_state)
 ann_frame_idx = 0
 ann_obj_id = 1
 points = np.array([[210, 250], [200, 600]], dtype=np.float32)
-labels = np.array([1, 0], np.int32)
+# points = np.array([[210, 350], [250, 220]], dtype=np.float32)
+labels = np.array([1, 0], np.int32) # `1` means positive click and `0` means negative click
 
 _, out_obj_ids, out_mask_logits = predictor.add_new_points(
+    inference_state=inference_state,
+    frame_idx=ann_frame_idx,
+    obj_id=ann_obj_id,
+    points=points,
+    labels=labels,
+)
+
+ann_frame_idx = 140
+ann_obj_id = 1
+points = np.array([[44, 366]], dtype=np.float32)
+labels = np.array([1], np.int32)
+_, _, out_mask_logits = predictor.add_new_points(
     inference_state=inference_state,
     frame_idx=ann_frame_idx,
     obj_id=ann_obj_id,
@@ -74,5 +76,21 @@ for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(
         out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
         for i, out_obj_id in enumerate(out_obj_ids)
     }
+    # for obj_id, mask in video_segments[out_frame_idx].items():
+    #     print(f"Object ID: {obj_id}, Mask Shape: {mask.shape}")
 
-print('done!')
+vis_frame_stride = 1
+output_dir = 'output_masks'
+if not os.path.exists(output_dir):
+    os.makedirs(output_dir)
+
+t_start = time.time()
+for out_frame_idx in range(0, len(frame_names), vis_frame_stride):
+    frame_path = os.path.join(video_dir, frame_names[out_frame_idx])
+    image = np.array(Image.open(frame_path), dtype=np.float32)  # Ensure image is in float format to blend properly
+    for out_obj_id, out_mask in video_segments[out_frame_idx].items():
+        mask_image = apply_mask_to_image(image, out_mask, obj_id=out_obj_id)
+        image = image * (1 - mask_image[..., 3, None]) + mask_image[..., :3] * mask_image[..., 3, None]  # Blend original and mask
+    output_image_path = os.path.join(output_dir, f"frame_{out_frame_idx}.png")
+    Image.fromarray(np.clip(image, 0, 255).astype('uint8')).save(output_image_path)  # Clip to valid range and convert to uint8
+print(time.time() - t_start)
