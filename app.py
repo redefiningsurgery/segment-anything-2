@@ -255,7 +255,7 @@ def zip_folder(folder_path, output_zip_path):
                 zipf.write(file_path, os.path.relpath(file_path, folder_path))
 
 def tracking_objects(Seg_Tracker, frame_num, input_video):
-    print('abed', frame_num)
+    print('Tracking started from frame:', frame_num)
     output_dir = 'output_frames'
     output_masks_dir = 'output_masks'
     output_combined_dir = 'output_combined'
@@ -265,25 +265,28 @@ def tracking_objects(Seg_Tracker, frame_num, input_video):
     if os.path.exists(output_video_path):
         os.remove(output_video_path)
 
-    print('init tracking...')
+    print('Initializing tracking...')
     video_segments = {}
     predictor, inference_state, image_predictor = Seg_Tracker
-    iteration_count = 0
-    for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(inference_state):
-        if iteration_count >= 0:
-            video_segments[out_frame_idx] = {
-                out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
-                for i, out_obj_id in enumerate(out_obj_ids)
-            }
-        if iteration_count == frame_num + 61:
-            break
-        iteration_count += 1
-    print('done tracking.')
+
+    # Set the starting frame and number of frames to track
+    start_frame_idx = frame_num
+    max_frame_num_to_track = 60  # You can adjust this or make it dynamic based on input
+
+    for out_frame_idx, out_obj_ids, out_mask_logits in predictor.propagate_in_video(
+            inference_state, start_frame_idx=start_frame_idx, max_frame_num_to_track=max_frame_num_to_track):
+        
+        video_segments[out_frame_idx] = {
+            out_obj_id: (out_mask_logits[i] > 0.0).cpu().numpy()
+            for i, out_obj_id in enumerate(out_obj_ids)
+        }
+        
+    print('Tracking done.')
     frame_files = sorted([f for f in os.listdir(output_dir) if f.endswith('.jpg')])
     # Saving the generated masks in the ./output_masks folder
     for frame_file in frame_files:
         frame_idx = int(os.path.splitext(frame_file)[0])
-        if frame_idx >= frame_num and frame_idx <= frame_num+60:
+        if start_frame_idx <= frame_idx < start_frame_idx + max_frame_num_to_track:
             frame_path = os.path.join(output_dir, frame_file)
             image = cv2.imread(frame_path)
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -296,20 +299,19 @@ def tracking_objects(Seg_Tracker, frame_num, input_video):
             combined_output_path = os.path.join(output_combined_dir, f'{frame_idx:07d}.png')
             combined_image_bgr = cv2.cvtColor(masked_frame, cv2.COLOR_RGB2BGR)
             cv2.imwrite(combined_output_path, combined_image_bgr)
-            if frame_idx == frame_num:
+            if frame_idx == start_frame_idx:
                 final_masked_frame = masked_frame
 
     cap = cv2.VideoCapture(input_video)
     fps = cap.get(cv2.CAP_PROP_FPS)
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    print(total_frames)
     cap.release()
     
     output_frames = len([name for name in os.listdir(output_combined_dir) if os.path.isfile(os.path.join(output_combined_dir, name)) and name.endswith('.png')])
     out_fps = fps * output_frames / total_frames
     ffmpeg.input(os.path.join(output_combined_dir, '%07d.png'), framerate=out_fps).output(output_video_path, vcodec='h264_nvenc', pix_fmt='yuv420p').run()
     zip_folder(output_masks_dir, output_zip_path)
-    print("done")
+    print("Tracking completed successfully.")
     return final_masked_frame, final_masked_frame, output_video_path, output_video_path, output_zip_path
 
 def increment_ann_obj_id(ann_obj_id):
