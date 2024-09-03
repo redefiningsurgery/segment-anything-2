@@ -9,8 +9,8 @@ from sam2.sam2_video_predictor import SAM2VideoPredictor
 predictor = SAM2VideoPredictor.from_pretrained("facebook/sam2-hiera-large")
 video_dir = "output_frames"
 ann_frame_idx, ann_obj_id = 100, 1
-points = np.array([[210, 250], [200, 600]], dtype=np.float32)
-labels = np.array([1, 0], np.int32) # `1` means positive click and `0` means negative click
+points = np.array([[210, 250], [300, 600]], dtype=np.float32)
+labels = np.array([1, 1], np.int32) # `1` means positive click and `0` means negative click
 
 with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
     inference_state = predictor.init_state(video_path=video_dir)
@@ -57,7 +57,7 @@ output_dir = 'output_masks'
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 
-for out_frame_idx in range(0, len(frame_names), vis_frame_stride):
+for out_frame_idx in sorted(video_segments.keys()):
     frame_path = os.path.join(video_dir, frame_names[out_frame_idx])
     image = np.array(Image.open(frame_path), dtype=np.float32)  # Ensure image is in float format to blend properly
     for out_obj_id, out_mask in video_segments[out_frame_idx].items():
@@ -65,9 +65,6 @@ for out_frame_idx in range(0, len(frame_names), vis_frame_stride):
         image = image * (1 - mask_image[..., 3, None]) + mask_image[..., :3] * mask_image[..., 3, None]  # Blend original and mask
     output_image_path = os.path.join(output_dir, f"frame_{out_frame_idx}.png")
     Image.fromarray(np.clip(image, 0, 255).astype('uint8')).save(output_image_path)  # Clip to valid range and convert to uint8
-
-print(inference_state["frames_already_tracked"][139]["reverse"])
-print(inference_state["frames_already_tracked"][140]["reverse"])
 
 
 print('done!')
